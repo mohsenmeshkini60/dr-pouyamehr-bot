@@ -1,21 +1,20 @@
 import os
 import time
-import json
 import requests
 from pathlib import Path
-from flask import Flask
+from flask import Flask, jsonify
 from threading import Thread
 
 # --- تنظیمات مسیر و توکن ---
 BASE_DIR = Path.cwd()
 CARD_FILE = BASE_DIR / "card.jpg"
 
-TOKEN = os.getenv("BALE_BOT_TOKEN", "").strip()
+TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 if not TOKEN:
-    raise RuntimeError("توکن بات یافت نشد!")
+    print("⚠️ هشدار: متغیر محیطی BOT_TOKEN تنظیم نشده است!")
 
-BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
+BASE_URL = f"https://api.telegram.org/bot{TOKEN}" if TOKEN else ""
 
 # ==========================================================
 
@@ -59,10 +58,10 @@ PREOP_TEXT = """
 APPOINTMENT_TEXT = """
 📍 *اطلاعات آدرس و نوبت‌دهی*
 کلینیک ریه بیمارستان امام خمینی(ره)
-📞 تلفن: ‎۰۶۱-۳۲۹۳۳۹۸۵-۸۷‎
-🗓️ پذیرش: یکشنبه‌ها ساعت ۱۴:00
+📞 تلفن: \u200e۰۶۱-۳۲۹۳۳۹۸۵-۸۷\u200e
+🗓️ پذیرش: یکشنبه‌ها ساعت ۱۴:۰۰
 کلینیک تخصصی بیمارستان گلستان
-📞 تلفن: ‎۰۶۱-۳۳۳۷۴۳۰۰۱‎
+📞 تلفن: \u200e۰۶۱-۳۳۳۷۴۳۰۰۱\u200e
 🗓️ پذیرش: چهارشنبه‌ها صبح
 """
 
@@ -77,11 +76,12 @@ EMERGENCY_TEXT = """
 
 DEVELOPER_TEXT = """
 🤖 *طراحی و توسعه دستیار هوشمند*
-این دستیار هوشمند توسط آقای محسن مشکینی، فارغ التحصیل دکتری مهندسی مکانیک طراحی، انجام و بارگذاری شده است
+این دستیار هوشمند توسط آقای محسن مشکینی،فارغ التحصیل دکتری مهندسی مکانیک طراحی،انجام و بارگذاری شده است
 """
 
 # ==========================================================
 
+# منوی اصلی (کیبورد معمولی)
 MAIN_REPLY_KEYBOARD = {
     "keyboard": [
         [{"text": "👩‍⚕️ معرفی پزشک"}, {"text": "🫁 اسپیرومتری"}],
@@ -89,9 +89,10 @@ MAIN_REPLY_KEYBOARD = {
         [{"text": "🪪 مشاهده کارت ویزیت"}, {"text": "🚨 موارد اورژانسی"}],
         [{"text": "🤖 طراحی و توسعه دستیار"}]
     ],
-    "text_keyboard": True
+    "resize_keyboard": True
 }
 
+# دکمه بازگشت (Inline)
 BACK_INLINE_KEYBOARD = {
     "inline_keyboard": [
         [{"text": "🔙 بازگشت به منو اصلی", "callback_data": "back_to_main"}]
@@ -103,36 +104,41 @@ BACK_INLINE_KEYBOARD = {
 # ==========================================================
 
 def send_message(chat_id, text, reply_markup=None, is_inline=False):
+    if not BASE_URL:
+        print("❌ توکن ربات تنظیم نشده است!")
+        return
+        
     url = f"{BASE_URL}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-
+    
     if reply_markup:
-        payload["reply_markup"] = json.dumps(reply_markup)
-
-    requests.post(url, json=payload, timeout=40)
+        payload["reply_markup"] = reply_markup
+            
+    response = requests.post(url, json=payload)
+    if not response.json().get("ok"):
+        print(f"⚠️ پاسخ نامعتبر از تلگرام: {response.text}", flush=True)
 
 def send_card_image(chat_id):
+    if not BASE_URL:
+        return
+        
     url = f"{BASE_URL}/sendPhoto"
     if CARD_FILE.exists():
         with open(CARD_FILE, "rb") as photo:
-            requests.post(
-                url,
-                files={"photo": photo},
-                data={
-                    "chat_id": chat_id,
-                    "reply_markup": json.dumps(BACK_INLINE_KEYBOARD)
-                },
-                timeout=40
-            )
+            requests.post(url, files={"photo": photo}, data={
+                "chat_id": chat_id,
+                "reply_markup": '{"inline_keyboard": [[{"text": "🔙 بازگشت به منو اصلی", "callback_data": "back_to_main"}]]}'
+            })
     else:
         send_message(chat_id, "⚠️ فایل کارت ویزیت پیدا نشد.", BACK_INLINE_KEYBOARD, is_inline=True)
 
 def handle_update(update):
+    # 1. پردازش پیام‌های متنی
     if "message" in update:
         message = update["message"]
         chat_id = message.get("chat", {}).get("id")
         text = message.get("text", "")
-
+        
         if chat_id:
             if text == "/start":
                 send_message(chat_id, WELCOME_TEXT, MAIN_REPLY_KEYBOARD, is_inline=False)
@@ -151,69 +157,55 @@ def handle_update(update):
             elif text == "🤖 طراحی و توسعه دستیار":
                 send_message(chat_id, DEVELOPER_TEXT, BACK_INLINE_KEYBOARD, is_inline=True)
 
+    # 2. پردازش کلیک روی دکمه بازگشت (Callback Query)
     elif "callback_query" in update:
         cb = update["callback_query"]
         chat_id = cb.get("message", {}).get("chat", {}).get("id")
         data = cb.get("data")
+        
+        if not chat_id or not data: return
 
-        if not chat_id or not data:
-            return
-
-        requests.post(
-            f"{BASE_URL}/answerCallbackQuery",
-            json={"callback_query_id": cb.get("id")},
-            timeout=40
-        )
+        requests.post(f"{BASE_URL}/answerCallbackQuery", json={"callback_query_id": cb.get("id")})
 
         if data == "back_to_main":
             send_message(chat_id, WELCOME_TEXT, MAIN_REPLY_KEYBOARD, is_inline=False)
 
-def main():
+# --- حلقه اصلی دریافت پیام‌ها (Polling) ---
+def main_bot_loop():
     offset = 0
-    print("✅ ربات با موفقیت اجرا شد. (منوی اصلی معمولی | دکمه بازگشت شیشه‌ای)", flush=True)
-
+    print("✅ ربات تلگرام با موفقیت اجرا شد.", flush=True)
     while True:
         try:
-            response = requests.get(
-                f"{BASE_URL}/getUpdates",
-                params={
-                    "offset": offset,
-                    "timeout": 30
-                },
-                timeout=40
-            )
-
-            response.raise_for_status()
-            result = response.json()
-
-            if result.get("ok") is not True:
-                print(f"⚠️ پاسخ نامعتبر از تل in result.getresult}", flush=True)
+            if not BASE_URL:
                 time.sleep(5)
                 continue
-
-            for update in result.get("result", []):
-                handle_update(update)
-                offset = update["update_id"] + 1
-
+                
+            url = f"{BASE_URL}/getUpdates?offset={offset}&timeout=30"
+            res = requests.get(url, timeout=40).json()
+            if "result" in res:
+                for update in res["result"]:
+                    handle_update(update)
+                    offset = update["update_id"] + 1
         except Exception as e:
-            print(f"❌ خطا: {e}", flush=True)
+            print(f"❌ خطا در دریافت آپدیت‌ها: {e}", flush=True)
             time.sleep(5)
 
-# ==========================================================
-# وب‌سرور برای Render
-# ==========================================================
-
+# --- وب‌سرور Flask برای Render ---
 app = Flask(__name__)
 
-@app.route("/")
-def home():
-    return "Dr Pouyamehr Telegram Bot is running.", 200
+@app.route('/')
+def health_check():
+    return jsonify({"status": "active", "bot": "Dr. Marjan Pouyamehr Telegram Bot"})
 
-@app.route("/health")
-def health():
-    return {"status": "ok"}, 200
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    Thread(target=main, daemon=True).start()
-    port = int(os.environ.get("PORT", "10000"))
-    app.run(host="0.0.0.0", port=port)
+    # اجرای وب‌سرور در یک ترد جداگانه
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+    
+    # اجرای حلقه اصلی ربات
+    main_bot_loop()
