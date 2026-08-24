@@ -1,63 +1,87 @@
-import json
 import os
 import time
+import json
 import requests
 from pathlib import Path
+from flask import Flask
+from threading import Thread
 
-# --- تنظیمات مسیر ---
-BASE_DIR = Path(__file__).resolve().parent
+# --- تنظیمات مسیر و توکن ---
+BASE_DIR = Path.cwd()
 CARD_FILE = BASE_DIR / "card.jpg"
 
-# --- خواندن توکن فقط از متغیر محیطی ---
-TOKEN = os.getenv("BOT_TOKEN", "").strip()
+TOKEN = os.getenv("BALE_BOT_TOKEN", "").strip()
 
 if not TOKEN:
-    raise RuntimeError(
-        "❌ متغیر محیطی BOT_TOKEN تنظیم نشده است."
-    )
+    raise RuntimeError("توکن بات یافت نشد!")
 
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
-# --- متون ربات ---
-WELCOME_TEXT = (
-    "✨ *به دستیار هوشمند دکتر مرجان پویامهر خوش آمدید* ✨\n"
-    "🩺 فوق‌تخصص ریه (بالغین)"
-)
+# ==========================================================
 
-DOCTOR_INFO_TEXT = (
-    "👩‍⚕️ *بیوگرافی*\n"
-    "دکتر مرجان پویامهر\n"
-    "فوق‌تخصص ریه"
-)
+WELCOME_TEXT = """
+✨ *به دستیار هوشمند دکتر مرجان پویامهر خوش آمدید* ✨
+🩺 فوق‌تخصص ریه (بالغین) | عضو هیئت علمی دانشگاه جندی شاپور اهواز
 
-SPIROMETRY_TEXT = (
-    "🫁 *راهنمای انجام اسپیرومتری*\n"
-    "نکات پیش از مراجعه..."
-)
+این دستیار جهت تسهیل ارتباط بیماران گرامی با مطب و ارائه آموزش‌های ضروری طراحی شده است.
 
-PREOP_TEXT = (
-    "📋 *مشاوره ریه پیش از عمل*\n"
-    "مدارک مورد نیاز..."
-)
+⚠️ *توجه بسیار مهم:*
+این سامانه جایگزین ویزیت و مراجعه حضوری به پزشک نیست. در صورت مشاهده علائم حاد مانند تنگی نفس شدید، درد قفسه سینه یا کبودی لب‌ها، فوراً با اورژانس تماس بگیرید.
+"""
 
-APPOINTMENT_TEXT = (
-    "📍 *اطلاعات آدرس و نوبت‌دهی*\n"
-    "تلفن: ۰۶۱-۳۲۹۳۳۹۸۵"
-)
+DOCTOR_INFO_TEXT = """
+👩‍⚕️ *بیوگرافی و سوابق علمی*
+• دکتر مرجان پویامهر
+• متخصص بیماری‌های داخلی
+• فوق‌تخصص بیماری های ریه 
+• عضو هیئت علمی دانشگاه علوم پزشکی جندی‌شاپور اهواز
+• دارای رتبه برتر بورد فوق‌تخصصی کشوری
+• شماره نظام پزشکی: ۱۵۳۹۹۹
+"""
 
-EMERGENCY_TEXT = (
-    "🚨 *موارد اورژانسی*\n"
-    "فوراً به اورژانس مراجعه کنید."
-)
+SPIROMETRY_TEXT = """
+🫁 *راهنمای انجام اسپیرومتری (نوار ریه)*
+نکات پیش از مراجعه:
+۱. حداقل یک ساعت پیش از تست سیگار نکشید.
+۲. از مصرف وعده غذایی سنگین خودداری کنید.
+۳. لباس راحت بپوشید.
+۴. فهرست داروهای مصرفی خود را همراه داشته باشید.
+"""
 
-DEVELOPER_TEXT = (
-    "🤖 *توسعه‌دهنده*\n"
-    "این دستیار هوشمند توسط آقای محسن مشکینی، "
-    "فارغ‌التحصیل دکتری مهندسی مکانیک، "
-    "طراحی، اجرا و توسعه یافته است."
-)
+PREOP_TEXT = """
+📋 *مشاوره ریه پیش از عمل جراحی*
+مدارک مورد نیاز:
+• نام دقیق عمل جراحی و نامه پزشک جراح
+• عکس قفسه سینه، در صورت وجود
+• فهرست داروهای مصرفی (به‌ویژه داروهای قلبی و ریوی)
+"""
 
-# --- منوها ---
+APPOINTMENT_TEXT = """
+📍 *اطلاعات آدرس و نوبت‌دهی*
+کلینیک ریه بیمارستان امام خمینی(ره)
+📞 تلفن: ‎۰۶۱-۳۲۹۳۳۹۸۵-۸۷‎
+🗓️ پذیرش: یکشنبه‌ها ساعت ۱۴:00
+کلینیک تخصصی بیمارستان گلستان
+📞 تلفن: ‎۰۶۱-۳۳۳۷۴۳۰۰۱‎
+🗓️ پذیرش: چهارشنبه‌ها صبح
+"""
+
+EMERGENCY_TEXT = """
+🚨 *موارد اورژانسی*
+در صورت بروز موارد زیر فوراً به اورژانس مراجعه کنید:
+- تنگی نفس شدید و ناگهانی
+- درد یا فشار در قفسه سینه
+- کبودی لب‌ها
+- کاهش سطح هوشیاری
+"""
+
+DEVELOPER_TEXT = """
+🤖 *طراحی و توسعه دستیار هوشمند*
+این دستیار هوشمند توسط آقای محسن مشکینی، فارغ التحصیل دکتری مهندسی مکانیک طراحی، انجام و بارگذاری شده است
+"""
+
+# ==========================================================
+
 MAIN_REPLY_KEYBOARD = {
     "keyboard": [
         [{"text": "👩‍⚕️ معرفی پزشک"}, {"text": "🫁 اسپیرومتری"}],
@@ -65,40 +89,33 @@ MAIN_REPLY_KEYBOARD = {
         [{"text": "🪪 مشاهده کارت ویزیت"}, {"text": "🚨 موارد اورژانسی"}],
         [{"text": "🤖 طراحی و توسعه دستیار"}]
     ],
-    "resize_keyboard": True
+    "text_keyboard": True
 }
 
 BACK_INLINE_KEYBOARD = {
     "inline_keyboard": [
-        [{"text": "🔙 بازگشت به منوی اصلی", "callback_data": "back_to_main"}]
+        [{"text": "🔙 بازگشت به منو اصلی", "callback_data": "back_to_main"}]
     ]
 }
 
+# ==========================================================
+# توابع اجرایی ربات
+# ==========================================================
 
-# --- توابع ارتباط با تلگرام ---
-def send_message(chat_id, text, reply_markup=None):
+def send_message(chat_id, text, reply_markup=None, is_inline=False):
     url = f"{BASE_URL}/sendMessage"
-
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown"
-    }
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
 
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
 
-    response = requests.post(url, json=payload, timeout=40)
-    response.raise_for_status()
-    return response.json()
-
+    requests.post(url, json=payload, timeout=40)
 
 def send_card_image(chat_id):
     url = f"{BASE_URL}/sendPhoto"
-
     if CARD_FILE.exists():
         with open(CARD_FILE, "rb") as photo:
-            response = requests.post(
+            requests.post(
                 url,
                 files={"photo": photo},
                 data={
@@ -107,68 +124,53 @@ def send_card_image(chat_id):
                 },
                 timeout=40
             )
-
-        response.raise_for_status()
-        return response.json()
-
-    send_message(
-        chat_id,
-        "⚠️ فایل کارت ویزیت پیدا نشد."
-    )
-
+    else:
+        send_message(chat_id, "⚠️ فایل کارت ویزیت پیدا نشد.", BACK_INLINE_KEYBOARD, is_inline=True)
 
 def handle_update(update):
-    # پردازش پیام‌های متنی
     if "message" in update:
         message = update["message"]
         chat_id = message.get("chat", {}).get("id")
         text = message.get("text", "")
 
-        actions = {
-            "/start": (WELCOME_TEXT, MAIN_REPLY_KEYBOARD),
-            "👩‍⚕️ معرفی پزشک": (DOCTOR_INFO_TEXT, BACK_INLINE_KEYBOARD),
-            "🫁 اسپیرومتری": (SPIROMETRY_TEXT, BACK_INLINE_KEYBOARD),
-            "📋 مشاوره قبل عمل": (PREOP_TEXT, BACK_INLINE_KEYBOARD),
-            "📍 آدرس و نوبت": (APPOINTMENT_TEXT, BACK_INLINE_KEYBOARD),
-            "🚨 موارد اورژانسی": (EMERGENCY_TEXT, BACK_INLINE_KEYBOARD),
-            "🤖 طراحی و توسعه دستیار": (
-                DEVELOPER_TEXT,
-                BACK_INLINE_KEYBOARD
-            )
-        }
+        if chat_id:
+            if text == "/start":
+                send_message(chat_id, WELCOME_TEXT, MAIN_REPLY_KEYBOARD, is_inline=False)
+            elif text == "👩‍⚕️ معرفی پزشک":
+                send_message(chat_id, DOCTOR_INFO_TEXT, BACK_INLINE_KEYBOARD, is_inline=True)
+            elif text == "🫁 اسپیرومتری":
+                send_message(chat_id, SPIROMETRY_TEXT, BACK_INLINE_KEYBOARD, is_inline=True)
+            elif text == "📋 مشاوره قبل عمل":
+                send_message(chat_id, PREOP_TEXT, BACK_INLINE_KEYBOARD, is_inline=True)
+            elif text == "📍 آدرس و نوبت":
+                send_message(chat_id, APPOINTMENT_TEXT, BACK_INLINE_KEYBOARD, is_inline=True)
+            elif text == "🪪 مشاهده کارت ویزیت":
+                send_card_image(chat_id)
+            elif text == "🚨 موارد اورژانسی":
+                send_message(chat_id, EMERGENCY_TEXT, BACK_INLINE_KEYBOARD, is_inline=True)
+            elif text == "🤖 طراحی و توسعه دستیار":
+                send_message(chat_id, DEVELOPER_TEXT, BACK_INLINE_KEYBOARD, is_inline=True)
 
-        if text in actions:
-            content, keyboard = actions[text]
-            send_message(chat_id, content, keyboard)
-
-        elif text == "🪪 مشاهده کارت ویزیت":
-            send_card_image(chat_id)
-
-    # پردازش دکمه‌های شیشه‌ای
     elif "callback_query" in update:
-        callback = update["callback_query"]
-        chat_id = callback.get("message", {}).get("chat", {}).get("id")
-        callback_id = callback.get("id")
-        data = callback.get("data")
+        cb = update["callback_query"]
+        chat_id = cb.get("message", {}).get("chat", {}).get("id")
+        data = cb.get("data")
+
+        if not chat_id or not data:
+            return
+
+        requests.post(
+            f"{BASE_URL}/answerCallbackQuery",
+            json={"callback_query_id": cb.get("id")},
+            timeout=40
+        )
 
         if data == "back_to_main":
-            requests.post(
-                f"{BASE_URL}/answerCallbackQuery",
-                json={"callback_query_id": callback_id},
-                timeout=40
-            )
-
-            send_message(
-                chat_id,
-                WELCOME_TEXT,
-                MAIN_REPLY_KEYBOARD
-            )
-
+            send_message(chat_id, WELCOME_TEXT, MAIN_REPLY_KEYBOARD, is_inline=False)
 
 def main():
     offset = 0
-
-    print("✅ ربات تلگرام در حال اجراست...", flush=True)
+    print("✅ ربات با موفقیت اجرا شد. (منوی اصلی معمولی | دکمه بازگشت شیشه‌ای)", flush=True)
 
     while True:
         try:
@@ -185,7 +187,7 @@ def main():
             result = response.json()
 
             if result.get("ok") is not True:
-                print(f"⚠️ پاسخ نامعتبر از تلگرام: {result}", flush=True)
+                print(f"⚠️ پاسخ نامعتبر از تل in result.getresult}", flush=True)
                 time.sleep(5)
                 continue
 
@@ -193,13 +195,13 @@ def main():
                 handle_update(update)
                 offset = update["update_id"] + 1
 
-        except Exception as error:
-            print(f"❌ خطا: {error}", flush=True)
+        except Exception as e:
+            print(f"❌ خطا: {e}", flush=True)
             time.sleep(5)
 
-
-from flask import Flask
-from threading import Thread
+# ==========================================================
+# وب‌سرور برای Render
+# ==========================================================
 
 app = Flask(__name__)
 
@@ -211,9 +213,7 @@ def home():
 def health():
     return {"status": "ok"}, 200
 
-
 if __name__ == "__main__":
     Thread(target=main, daemon=True).start()
-
     port = int(os.environ.get("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
